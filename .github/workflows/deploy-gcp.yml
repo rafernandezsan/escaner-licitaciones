@@ -12,7 +12,7 @@ env:
   SERVICE_NAME: langgraph-orchestrator-worker
   
   WORKLOAD_IDENTITY_PROVIDER: projects/1066450737358/locations/global/workloadIdentityPools/github-pool/providers/github-provider # <-- Cambia esto: done
-  SERVICE_ACCOUNT: github-actions-sa@1066450737358.iam.gserviceaccount.com # <-- Cambia esto: done
+  SERVICE_ACCOUNT: github-actions-sa@escanerlicitaciones.iam.gserviceaccount.com # <-- Cambia esto: done
 
 jobs:
   build-and-deploy:
