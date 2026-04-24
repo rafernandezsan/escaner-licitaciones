@@ -20,8 +20,8 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
-      
-steps:
+
+    steps:
       - name: Checkout del código
         uses: actions/checkout@v4
 
