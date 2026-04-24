@@ -6,13 +6,13 @@ on:
       - main
 
 env:
-  PROJECT_ID: TU_PROYECTO_ID # <-- Cambia esto
+  PROJECT_ID: 1066450737358 # <-- Cambia esto: done
   REGION: us-east1
   REPO_NAME: escaner-ti-langgraph-agents
   SERVICE_NAME: langgraph-orchestrator-worker
   
-  WORKLOAD_IDENTITY_PROVIDER: projects/123456789/locations/global/workloadIdentityPools/github-pool/providers/github-provider # <-- Cambia esto
-  SERVICE_ACCOUNT: github-actions-sa@TU_PROYECTO_ID.iam.gserviceaccount.com # <-- Cambia esto
+  WORKLOAD_IDENTITY_PROVIDER: projects/1066450737358/locations/global/workloadIdentityPools/github-pool/providers/github-provider # <-- Cambia esto: done
+  SERVICE_ACCOUNT: github-actions-sa@1066450737358.iam.gserviceaccount.com # <-- Cambia esto: done
 
 jobs:
   build-and-deploy:
