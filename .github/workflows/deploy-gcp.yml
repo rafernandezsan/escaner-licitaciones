@@ -1,0 +1,47 @@
+name: Deploy Escaner a GCP Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PROJECT_ID: TU_PROYECTO_ID # <-- Cambia esto
+  REGION: us-east1
+  REPO_NAME: escaner-ti-langgraph-agents
+  SERVICE_NAME: langgraph-orchestrator-worker
+  
+  WORKLOAD_IDENTITY_PROVIDER: projects/123456789/locations/global/workloadIdentityPools/github-pool/providers/github-provider # <-- Cambia esto
+  SERVICE_ACCOUNT: github-actions-sa@TU_PROYECTO_ID.iam.gserviceaccount.com # <-- Cambia esto
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+
+      - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build y Push
+        env:
+          IMAGE_TAG: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/worker:${{ github.sha }}
+        run: |
+          docker build -t $IMAGE_TAG .
+          docker push $IMAGE_TAG
+          echo "FULL_IMAGE_NAME=$IMAGE_TAG" >> $GITHUB_ENV
+
+      - uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: ${{ env.FULL_IMAGE_NAME }}
