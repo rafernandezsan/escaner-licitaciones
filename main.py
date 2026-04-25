@@ -25,7 +25,7 @@ def evaluar_licitacion(state: LicitacionState):
     print(f"🕵️‍♂️ Gemini analizando licitación: {state.get('id_proceso')}")
     
     # Conectamos con el modelo más rápido y eficiente de Google
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
     
     # Obligamos al modelo a respetar nuestro formato de respuesta Pydantic
     llm_estructurado = llm.with_structured_output(EvaluacionLicitacion)
