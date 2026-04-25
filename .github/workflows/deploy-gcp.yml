@@ -4,19 +4,21 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 env:
-  PROJECT_ID: escanerlicitaciones # <-- Cambia esto: done
+  PROJECT_ID: escanerlicitaciones
   REGION: us-east1
   REPO_NAME: escaner-ti-langgraph-agents
   SERVICE_NAME: langgraph-orchestrator-worker
   
-  WORKLOAD_IDENTITY_PROVIDER: projects/1066450737358/locations/global/workloadIdentityPools/github-pool/providers/github-provider # <-- Cambia esto: done
-  SERVICE_ACCOUNT: github-actions-sa@escanerlicitaciones.iam.gserviceaccount.com # <-- Cambia esto: done
+  WORKLOAD_IDENTITY_PROVIDER: projects/1066450737358/locations/global/workloadIdentityPools/github-pool/providers/github-provider 
+  SERVICE_ACCOUNT: github-actions-sa@escanerlicitaciones.iam.gserviceaccount.com 
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -29,7 +31,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2
         with:
-          token_format: 'access_token' # <-- ESTO ES CLAVE PARA DOCKER
+          token_format: 'access_token'
           workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.SERVICE_ACCOUNT }}
 
@@ -50,3 +52,7 @@ jobs:
 
       - name: Desplegar en Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: ${{ env.FULL_IMAGE_NAME }}
