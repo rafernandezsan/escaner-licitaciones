@@ -32,6 +32,49 @@ def obtener_licitaciones():
 
 df = obtener_licitaciones()
 
+def obtener_documentos_vinculados(id_proceso):
+    try:
+        conn = psycopg2.connect(
+            host=st.secrets["DB_HOST"], database=st.secrets["DB_NAME"],
+            user=st.secrets["DB_USER"], password=st.secrets["DB_PASS"]
+        )
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, nombre_archivo, documento_url, mime_type 
+            FROM documentos_licitacion 
+            WHERE id_proceso = %s 
+            ORDER BY fecha_subida DESC
+        """, (id_proceso,))
+        docs = cur.fetchall()
+        cur.close()
+        conn.close()
+        return docs
+    except Exception as e:
+        st.error(f"Error BD: {e}")
+        return pd.DataFrame()
+    
+
+def eliminar_documento_api(id_doc):
+    try:
+        # Llamamos al endpoint de eliminar que creamos en el main.py
+        response = requests.post(
+            f"{API_URL}/eliminar_documento", 
+            data={"id_doc": id_doc}
+        )
+        return response.status_code == 200
+    except Exception as e:
+        st.error(f"Error al conectar con la API: {e}")
+        return False
+    
+
+def obtener_enlace_descarga(id_doc):
+    try:
+        res = requests.post(f"{API_URL}/generar_descarga", data={"id_doc": id_doc})
+        if res.status_code == 200:
+            return res.json().get("url_descarga")
+    except:
+        return None
+
 # --- 2. BARRA LATERAL: REGISTRAR NUEVA ---
 with st.sidebar:
     st.header("➕ Registrar Licitación")
@@ -76,7 +119,7 @@ for index, row in df.iterrows():
                         st.success("Análisis completado.")
                         st.cache_data.clear()
                         st.rerun()
-    
+
             # if st.button("🔄 Ejecutar Re-evaluación IA", key=f"eval_{row['ID']}"):
             #    with st.spinner("Gemini está leyendo el documento en Cloud Storage..."):
             #        res = requests.post(API_URL, data={"id_proceso": row['ID']})
@@ -96,11 +139,39 @@ for index, row in df.iterrows():
                 
         # PESTAÑA 3: DOCUMENTOS (LO NUEVO)
         with tab3:
-            st.markdown("### Documentos Vinculados")
-            if pd.notna(row['Documento_URL']) and row['Documento_URL']:
-                st.success(f"📄 **Pliego actual en la nube:** `{row['Documento_URL']}`")
+            st.subheader("📂 Expediente Digital")
+    
+            docs_vinculados = obtener_documentos_vinculados(row['ID'])
+            
+            if docs_vinculados:
+                with st.expander(f"Ver {len(docs_vinculados)} documentos archivados", expanded=True):
+                    for doc_id, nombre, url, mime in docs_vinculados:
+                        col_nom, col_desc, col_bor = st.columns([3, 1, 1])
+                        
+                        with col_nom:
+                            st.caption(f"📄 {nombre}")
+                        
+                        with col_desc:
+                            # Botón de descarga (usando la URL de GCS o proxy)
+                            # Nota: Para descarga directa desde GCS se requiere un Signed URL
+                            url_segura = obtener_enlace_descarga(doc_id)
+                            if url_segura:
+                                st.link_button("📥 Descargar", url_segura, use_container_width=True)
+                            else:
+                                st.error("Error de enlace")
+                            #st.link_button("Descargar", url, use_container_width=True)
+                        
+                        with col_bor:
+                            if st.button("🗑️ Borrar", key=f"del_{doc_id}", help="Eliminar de GCS y Base de Datos", type="secondary"):
+                                with st.spinner("Eliminando..."):
+                                    if eliminar_documento_api(doc_id):
+                                        st.toast(f"✅ {nombre} eliminado correctamente")
+                                        st.cache_data.clear() # Limpiamos caché para ver cambios
+                                        st.rerun() # Refrescamos la UI
+                                    else:
+                                        st.error("No se pudo eliminar el archivo.")
             else:
-                st.warning("No hay ningún pliego vinculado a este proceso.")
+                st.info("No hay documentos vinculados aún.")
                 
             st.divider()
             archivo_nuevo = st.file_uploader("Agregar archivo al expediente", key=f"repo_{row['ID']}")
@@ -109,18 +180,6 @@ for index, row in df.iterrows():
                     files = {"archivo": (archivo_nuevo.name, archivo_nuevo.getvalue(), archivo_nuevo.type)}
                     requests.post(f"{API_URL}/subir_documento", data={"id_proceso": row['ID']}, files=files)
                     st.success("Guardado en el repositorio.")
-            
-            if st.button("📤 Procesar con IA Multimodal", key=f"btn_up_{row['ID']}"):
-                if archivo_comodin:
-                    with st.spinner("Gemini analizando el archivo..."):
-                        payload = {"id_proceso": row['ID'], "titulo": row['Título']}
-                        # Pasamos el type original del archivo (image/jpeg, application/pdf, etc)
-                        files = {"archivo": (archivo_comodin.name, archivo_comodin.getvalue(), archivo_comodin.type)}
                         
-                        res = requests.post(API_URL, data=payload, files=files)
-                        if res.status_code == 200:
-                            st.success(f"Procesado como {archivo_comodin.type}")
-                            st.cache_data.clear()
-                            st.rerun()
                 else:
                     st.error("Por favor adjunta un archivo primero.")

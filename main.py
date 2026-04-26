@@ -102,3 +102,63 @@ async def analizar_con_todo_el_repositorio(id_proceso: str = Form(...)):
     cur.close()
     conn.close()
     return {"status": "success", "puntuacion": data_ia['puntuacion']}
+
+@app.post("/eliminar_documento")
+async def eliminar_documento(id_doc: int = Form(...)):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # 1. Obtener URL para borrar de GCS
+    cur.execute("SELECT documento_url FROM documentos_licitacion WHERE id = %s", (id_doc,))
+    res = cur.fetchone()
+    
+    if res:
+        gcs_uri = res[0] # gs://bucket-name/id_proceso/archivo.pdf
+        # Lógica para borrar de GCS
+        client = storage.Client()
+        bucket = client.bucket(BUCKET_NAME)
+        blob_path = gcs_uri.replace(f"gs://{BUCKET_NAME}/", "")
+        blob = bucket.blob(blob_path)
+        blob.delete()
+        
+        # 2. Borrar de SQL
+        cur.execute("DELETE FROM documentos_licitacion WHERE id = %s", (id_doc,))
+        conn.commit()
+    
+    cur.close()
+    conn.close()
+    return {"status": "success"}
+
+
+from datetime import timedelta
+
+@app.post("/generar_descarga")
+async def generar_descarga(id_doc: int = Form(...)):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # 1. Buscar la URL original en la BD
+    cur.execute("SELECT documento_url FROM documentos_licitacion WHERE id = %s", (id_doc,))
+    res = cur.fetchone()
+    
+    if not res:
+        return {"error": "Documento no encontrado"}, 404
+        
+    gcs_uri = res[0] # gs://bucket-name/id/archivo.pdf
+    
+    # 2. Generar URL Firmada de GCS
+    client = storage.Client()
+    bucket = client.bucket(BUCKET_NAME)
+    blob_path = gcs_uri.replace(f"gs://{BUCKET_NAME}/", "")
+    blob = bucket.blob(blob_path)
+    
+    # El enlace expirará en 15 minutos
+    url_firmada = blob.generate_signed_url(
+        version="v4",
+        expiration=timedelta(minutes=15),
+        method="GET"
+    )
+    
+    cur.close()
+    conn.close()
+    return {"url_descarga": url_firmada}
