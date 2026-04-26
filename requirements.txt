@@ -9,5 +9,5 @@ google-cloud-storage
 langchain-google-vertexai
 python-multipart
 langchain-core
-google-auth
-google-cloud-storage
+google-cloud-storage>=2.10.0
+google-auth>=2.20.0

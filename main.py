@@ -130,9 +130,10 @@ async def eliminar_documento(id_doc: int = Form(...)):
     return {"status": "success"}
 
 
-from datetime import timedelta
-from google.auth import default, impersonated_credentials
+import google.auth
+from google.auth.transport.requests import Request
 from google.cloud import storage
+from datetime import timedelta
 
 @app.post("/generar_descarga")
 async def generar_descarga(id_doc: int = Form(...)):
@@ -148,10 +149,12 @@ async def generar_descarga(id_doc: int = Form(...)):
         
     gcs_uri = res[0] # gs://bucket-name/id/archivo.pdf
     
-    creds, project = default()
+    credentials, project_id = google.auth.default()
+    auth_request = Request()
+    credentials.refresh(auth_request)
 
     # 2. Generar URL Firmada de GCS
-    client = storage.Client(credentials=creds, project=project)
+    client = storage.Client(credentials=credentials, project=project_id)
     bucket = client.bucket(BUCKET_NAME)
     blob_path = gcs_uri.replace(f"gs://{BUCKET_NAME}/", "")
     blob = bucket.blob(blob_path)
