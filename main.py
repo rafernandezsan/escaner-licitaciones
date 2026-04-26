@@ -2,11 +2,11 @@ import os
 import psycopg2
 from fastapi import FastAPI, UploadFile, File, Form, Request
 from google.cloud import storage
-from langchain_google_vertexai import ChatVertexAI
+from langchain_google_vertexai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 
 app = FastAPI()
-BUCKET_NAME = f"escaner-licitaciones-docs-{os.environ.get('GOOGLE_CLOUD_PROJECT')}"
+BUCKET_NAME = "escaner-licitaciones-docs-escanerlicitaciones"
 
 def get_db_connection():
     return psycopg2.connect(host=os.environ["DB_HOST"], database=os.environ["DB_NAME"], 
@@ -44,8 +44,8 @@ async def analizar_o_reevaluar(
     notas = memoria[0] if memoria and memoria[0] else "Sin notas adicionales."
     
     # 3. Razonamiento de Gemini (Vertex AI lee directo de GCS)
-    # Gemini 1.5 Flash es ideal por su ventana de contexto para documentos de 200+ páginas
-    llm = ChatVertexAI(model_name="gemini-1.5-flash")
+    # Gemini 2.5 Flash es ideal por su ventana de contexto para documentos de 200+ páginas
+    llm = ChatGoogleGenerativeAI (model_name="gemini-2.5-flash")
     
     instruccion = f"""Analiza esta licitación técnica. 
     CONTEXTO DEL CONSULTOR: {notas}
