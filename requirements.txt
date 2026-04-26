@@ -9,3 +9,5 @@ google-cloud-storage
 langchain-google-vertexai
 python-multipart
 langchain-core
+google-auth
+google-cloud-storage
