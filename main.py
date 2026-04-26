@@ -1,9 +1,8 @@
 import os
-import base64
 import psycopg2
 from fastapi import FastAPI, UploadFile, File, Form
 from google.cloud import storage
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_vertexai import ChatVertexAI
 from langchain_core.messages import HumanMessage
 
 app = FastAPI()
@@ -20,14 +19,6 @@ def upload_to_gcs(file_bytes, file_name):
     blob.upload_from_string(file_bytes, content_type='application/pdf')
     return f"gs://{BUCKET_NAME}/{file_name}"
 
-def download_from_gcs(gcs_uri):
-    """Descarga el archivo de GCS a la memoria de Cloud Run para enviarlo a Gemini"""
-    client = storage.Client()
-    bucket = client.bucket(BUCKET_NAME)
-    blob_name = gcs_uri.split(f"gs://{BUCKET_NAME}/")[-1]
-    blob = bucket.blob(blob_name)
-    return blob.download_as_bytes()
-
 @app.post("/")
 async def analizar_o_reevaluar(
     id_proceso: str = Form(...),
@@ -37,46 +28,41 @@ async def analizar_o_reevaluar(
     conn = get_db_connection()
     cur = conn.cursor()
     
-    # 1. Obtener el Documento y los Bytes
+    # 1. Obtener el Documento
     gcs_uri = None
-    file_bytes = None
-    
     if archivo:
         file_bytes = await archivo.read()
         gcs_uri = upload_to_gcs(file_bytes, f"{id_proceso}.pdf")
     else:
         cur.execute("SELECT documento_url FROM analisis_licitaciones WHERE id_proceso = %s", (id_proceso,))
         res = cur.fetchone()
-        if res and res[0]: 
-            gcs_uri = res[0]
-            # Si es re-evaluación, bajamos el archivo de la nube a la memoria
-            file_bytes = download_from_gcs(gcs_uri)
+        if res and res[0]: gcs_uri = res[0]
 
     # 2. Obtener Memoria (Notas)
     cur.execute("SELECT notas FROM analisis_licitaciones WHERE id_proceso = %s", (id_proceso,))
     memoria = cur.fetchone()
     notas = memoria[0] if memoria and memoria[0] else "Sin notas adicionales."
     
-    # 3. Razonamiento de Gemini (Usando ChatGoogleGenerativeAI)
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+    # 3. Razonamiento Nativo con Vertex AI (Lee el gs:// directamente)
+    # Importante: location debe coincidir con la región de tu Cloud Run
+    llm = ChatVertexAI(model_name="gemini-2.5-flash", location="us-east1", temperature=0)
     
     instruccion = f"""Analiza esta licitación técnica. 
     CONTEXTO DEL CONSULTOR: {notas}
     Si hay notas, ajusta el score basándote en ellas. 
     Responde estrictamente en JSON: {{"puntuacion": 8, "razonamiento": "explicación", "es_objetivo": true}}"""
     
-    # Preparamos el contenido
     contenido_mensaje = [{"type": "text", "text": instruccion}]
     
-    # Si logramos conseguir el PDF, lo codificamos en Base64 y lo adjuntamos
-    if file_bytes:
-        pdf_b64 = base64.b64encode(file_bytes).decode("utf-8")
+    if gcs_uri:
+        # Así se le envía un archivo nativo a Vertex AI
         contenido_mensaje.append({
-            "type": "image_url", 
-            "image_url": {"url": f"data:application/pdf;base64,{pdf_b64}"}
+            "type": "media", 
+            "file_uri": gcs_uri, 
+            "mime_type": "application/pdf"
         })
     else:
-        contenido_mensaje[0]["text"] += "\n[ADVERTENCIA: No se encontró ningún documento PDF vinculado para analizar.]"
+        contenido_mensaje[0]["text"] += "\n[ADVERTENCIA: No hay documento.]"
 
     mensaje = HumanMessage(content=contenido_mensaje)
     resultado = llm.invoke([mensaje])
@@ -87,7 +73,7 @@ async def analizar_o_reevaluar(
     try:
         data_ia = json.loads(texto_ia)
     except:
-        data_ia = {"puntuacion": 0, "razonamiento": "Error al procesar la respuesta de la IA.", "es_objetivo": False}
+        data_ia = {"puntuacion": 0, "razonamiento": "Error de formato.", "es_objetivo": False}
 
     # 4. Sincronizar Base de Datos
     cur.execute("""
