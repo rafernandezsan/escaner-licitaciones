@@ -119,6 +119,23 @@ for index, row in df.iterrows():
                         st.success("Análisis completado.")
                         st.cache_data.clear()
                         st.rerun()
+                        
+            if st.button("📄 Preparar PDF Ejecutivo", key=f"pdf_prep_{row['ID']}"):
+                with st.spinner("Creando PDF en el servidor..."):
+                    res_pdf = requests.post(f"{API_URL}/generar_reporte_pdf", data={"id_proceso": row['ID']})
+                    if res_pdf.status_code == 200:
+                        st.session_state[f"pdf_data_{row['ID']}"] = res_pdf.content
+                    else:
+                        st.error(f"Error al generar el PDF (HTTP {res_pdf.status_code}): {res_pdf.text}")
+            
+            if f"pdf_data_{row['ID']}" in st.session_state:
+                st.download_button(
+                    label="📥 Descargar Reporte PDF",
+                    data=st.session_state[f"pdf_data_{row['ID']}"],
+                    file_name=f"Reporte_{row['ID']}.pdf",
+                    mime="application/pdf",
+                    key=f"dl_pdf_{row['ID']}"
+                )
 
             # if st.button("🔄 Ejecutar Re-evaluación IA", key=f"eval_{row['ID']}"):
             #    with st.spinner("Gemini está leyendo el documento en Cloud Storage..."):

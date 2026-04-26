@@ -1,10 +1,16 @@
 import os
 import psycopg2
 import json
-from fastapi import FastAPI, UploadFile, File, Form
+import io
+import html
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.responses import StreamingResponse
 from google.cloud import storage
 from langchain_google_vertexai import ChatVertexAI
 from langchain_core.messages import HumanMessage
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
 
 app = FastAPI()
 BUCKET_NAME = "escaner-licitaciones-docs-escanerlicitaciones"
@@ -179,3 +185,63 @@ async def generar_descarga(id_doc: int = Form(...)):
     cur.close()
     conn.close()
     return {"url_descarga": url_firmada}
+
+
+# --- ENDPOINT 3: GENERACIÓN DE REPORTE PDF ---
+@app.post("/generar_reporte_pdf")
+async def generar_reporte_pdf(id_proceso: str = Form(...)):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute("""
+        SELECT titulo, estado, puntuacion, reporte_completo 
+        FROM analisis_licitaciones 
+        WHERE id_proceso = %s
+    """, (id_proceso,))
+    res = cur.fetchone()
+    
+    cur.close()
+    conn.close()
+    
+    if not res:
+        raise HTTPException(status_code=404, detail="Licitación no encontrada")
+        
+    titulo, estado, puntuacion, reporte_completo = res
+    reporte_completo = reporte_completo if reporte_completo else "No hay análisis de IA disponible aún."
+    puntuacion = puntuacion if puntuacion else 0
+    
+    # 1. Crear el PDF en memoria usando un buffer
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # 2. Ensamblar la estructura del documento
+    story.append(Paragraph(f"Reporte Ejecutivo: {id_proceso}", styles['Title']))
+    story.append(Spacer(1, 12))
+    story.append(Paragraph(f"<b>Título de la Licitación:</b> {html.escape(titulo if titulo else 'N/A')}", styles['Normal']))
+    story.append(Paragraph(f"<b>Estado del Expediente:</b> {html.escape(estado if estado else 'N/A')}", styles['Normal']))
+    story.append(Paragraph(f"<b>Puntuación Asignada por IA:</b> {puntuacion}/10", styles['Normal']))
+    story.append(Spacer(1, 24))
+    
+    story.append(Paragraph("<b>Razonamiento y Análisis de Gemini:</b>", styles['Heading2']))
+    
+    # 3. Formatear el reporte de la IA (manejamos saltos de línea básicos)
+    for parrafo in reporte_completo.split('\n'):
+        if parrafo.strip():
+            # Escapamos los signos &, < y > para evitar errores en el parseo XML interno de ReportLab
+            texto_seguro = html.escape(parrafo.strip())
+            story.append(Paragraph(texto_seguro, styles['Normal']))
+            story.append(Spacer(1, 6))
+            
+    doc.build(story)
+    
+    # 4. Preparar el buffer para lectura
+    buffer.seek(0)
+    
+    # 5. Retornar el archivo PDF generado
+    return StreamingResponse(
+        buffer, 
+        media_type="application/pdf", 
+        headers={"Content-Disposition": f'attachment; filename="Reporte_Licitacion_{id_proceso}.pdf"'}
+    )

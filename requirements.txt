@@ -11,3 +11,4 @@ python-multipart
 langchain-core
 google-cloud-storage>=2.10.0
 google-auth>=2.20.0
+reportlab
