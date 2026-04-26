@@ -1,74 +1,78 @@
 import os
 import psycopg2
-from fastapi import FastAPI, Request
-from pydantic import BaseModel, Field
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import PromptTemplate
+from fastapi import FastAPI, UploadFile, File, Form, Request
+from google.cloud import storage
+from langchain_google_vertexai import ChatVertexAI
+from langchain_core.messages import HumanMessage
 
 app = FastAPI()
+BUCKET_NAME = f"escaner-licitaciones-docs-{os.environ.get('GOOGLE_CLOUD_PROJECT')}"
 
 def get_db_connection():
-    return psycopg2.connect(
-        host=os.environ.get("DB_HOST"),
-        database=os.environ.get("DB_NAME"),
-        user=os.environ.get("DB_USER"),
-        password=os.environ.get("DB_PASS")
-    )
+    return psycopg2.connect(host=os.environ["DB_HOST"], database=os.environ["DB_NAME"], 
+                            user=os.environ["DB_USER"], password=os.environ["DB_PASS"])
 
-class EvaluacionLicitacion(BaseModel):
-    puntuacion: int = Field(description="Score 1-10")
-    es_objetivo: bool = Field(description="¿Es desarrollo de software?")
-    razonamiento: str = Field(description="Breve explicación de por qué esta nota")
+def upload_to_gcs(file_bytes, file_name):
+    client = storage.Client()
+    bucket = client.bucket(BUCKET_NAME)
+    blob = bucket.blob(file_name)
+    blob.upload_from_string(file_bytes, content_type='application/pdf')
+    return f"gs://{BUCKET_NAME}/{file_name}"
 
 @app.post("/")
-async def analizar_con_memoria(request: Request):
-    body = await request.json()
-    id_proceso = body.get("id_proceso")
-    texto = body.get("texto_extraido")
-    
-    # 1. Recuperar notas previas de la DB
-    notas_previas = ""
+async def analizar_o_reevaluar(
+    id_proceso: str = Form(...),
+    titulo: str = Form(None),
+    archivo: UploadFile = File(None)
+):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT notas FROM analisis_licitaciones WHERE id_proceso = %s", (id_proceso,))
-    row = cur.fetchone()
-    if row and row[0]:
-        notas_previas = f"\n[NOTAS IMPORTANTES DEL CONSULTOR]: {row[0]}"
     
-    # 2. IA con Contexto
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
-    llm_estructurado = llm.with_structured_output(EvaluacionLicitacion)
-    
-    prompt = PromptTemplate.from_template("""
-    Eres un consultor experto. Evalúa esta licitación.
-    PLIEGO: {texto}
-    {contexto}
-    
-    Si hay notas del consultor, dales prioridad absoluta para ajustar el score.
-    """)
-    
-    res = (prompt | llm_estructurado).invoke({"texto": texto, "contexto": notas_previas})
-    
-    # 3. Guardar todo (incluyendo el reporte generado)
-    cur.execute("""
-        INSERT INTO analisis_licitaciones (id_proceso, titulo, estado, puntuacion, es_objetivo, reporte_completo)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        ON CONFLICT (id_proceso) DO UPDATE 
-        SET puntuacion = EXCLUDED.puntuacion, es_objetivo = EXCLUDED.es_objetivo, reporte_completo = EXCLUDED.reporte_completo
-    """, (id_proceso, body.get("titulo", "Sin Título"), "Analizada", res.puntuacion, res.es_objetivo, res.razonamiento))
-    
-    conn.commit()
-    cur.close()
-    conn.close()
-    return {"status": "success", "score": res.puntuacion}
+    # 1. Obtener el Documento (Nuevo o Existente)
+    gcs_uri = None
+    if archivo:
+        file_bytes = await archivo.read()
+        gcs_uri = upload_to_gcs(file_bytes, f"{id_proceso}.pdf")
+    else:
+        cur.execute("SELECT documento_url FROM analisis_licitaciones WHERE id_proceso = %s", (id_proceso,))
+        res = cur.fetchone()
+        if res: gcs_uri = res[0]
 
-@app.post("/guardar_notas")
-async def guardar_notas(request: Request):
-    body = await request.json()
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("UPDATE analisis_licitaciones SET notas = %s WHERE id_proceso = %s", (body['notas'], body['id_proceso']))
+    # 2. Obtener Memoria (Notas y Reporte previo)
+    cur.execute("SELECT notas, reporte_completo FROM analisis_licitaciones WHERE id_proceso = %s", (id_proceso,))
+    memoria = cur.fetchone()
+    notas = memoria[0] if memoria and memoria[0] else "Sin notas adicionales."
+    
+    # 3. Razonamiento de Gemini (Vertex AI lee directo de GCS)
+    # Gemini 1.5 Flash es ideal por su ventana de contexto para documentos de 200+ páginas
+    llm = ChatVertexAI(model_name="gemini-1.5-flash")
+    
+    instruccion = f"""Analiza esta licitación técnica. 
+    CONTEXTO DEL CONSULTOR: {notas}
+    Si hay notas, ajusta el score basándote en ellas. 
+    Responde estrictamente en JSON: {{"puntuacion": int, "razonamiento": str, "es_objetivo": bool}}"""
+    
+    mensaje = HumanMessage(content=[
+        {"type": "text", "text": instruccion},
+        {"type": "media", "file_uri": gcs_uri, "mime_type": "application/pdf"}
+    ])
+    
+    resultado = llm.invoke([mensaje])
+    # Aquí parseamos el resultado (asumiendo formato JSON correcto)
+    import json
+    data_ia = json.loads(resultado.content.replace('```json', '').replace('```', ''))
+
+    # 4. Sincronizar Persistencia
+    cur.execute("""
+        INSERT INTO analisis_licitaciones (id_proceso, titulo, documento_url, puntuacion, es_objetivo, reporte_completo, estado)
+        VALUES (%s, %s, %s, %s, %s, %s, 'Analizada')
+        ON CONFLICT (id_proceso) DO UPDATE SET 
+            puntuacion = EXCLUDED.puntuacion,
+            reporte_completo = EXCLUDED.reporte_completo,
+            documento_url = COALESCE(EXCLUDED.documento_url, analisis_licitaciones.documento_url)
+    """, (id_proceso, titulo, gcs_uri, data_ia['puntuacion'], data_ia['es_objetivo'], data_ia['razonamiento']))
+    
     conn.commit()
     cur.close()
     conn.close()
-    return {"status": "nota_guardada"}
+    return {"status": "success", "score": data_ia['puntuacion']}

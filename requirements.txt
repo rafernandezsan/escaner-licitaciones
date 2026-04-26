@@ -5,3 +5,5 @@ langchain
 langchain-google-genai
 pydantic
 psycopg2-binary
+google-cloud-storage
+langchain-google-vertexai
