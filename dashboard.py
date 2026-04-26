@@ -69,13 +69,21 @@ for index, row in df.iterrows():
             st.write(f"**Estado:** {row['Estado']}")
             st.markdown(f"**Conclusión de Gemini:**\n> {row['Reporte'] if pd.notna(row['Reporte']) else 'Sin análisis aún.'}")
             
-            if st.button("🔄 Ejecutar Re-evaluación IA", key=f"eval_{row['ID']}"):
-                with st.spinner("Gemini está leyendo el documento en Cloud Storage..."):
-                    res = requests.post(API_URL, data={"id_proceso": row['ID']})
-                    if res.status_code == 200:
+            if st.button("🤖 Ejecutar Análisis Global", key=f"btn_run_{row['ID']}"):
+                with st.spinner("El agente está procesando todo el expediente..."):
+                    res_analisis = requests.post(f"{API_URL}/analizar", data={"id_proceso": row['ID']})
+                    if res_analisis.status_code == 200:
                         st.success("Análisis completado.")
                         st.cache_data.clear()
                         st.rerun()
+    
+            # if st.button("🔄 Ejecutar Re-evaluación IA", key=f"eval_{row['ID']}"):
+            #    with st.spinner("Gemini está leyendo el documento en Cloud Storage..."):
+            #        res = requests.post(API_URL, data={"id_proceso": row['ID']})
+            #        if res.status_code == 200:
+            #            st.success("Análisis completado.")
+            #            st.cache_data.clear()
+            #            st.rerun() 
         
         # PESTAÑA 2: NOTAS
         with tab2:
@@ -95,11 +103,12 @@ for index, row in df.iterrows():
                 st.warning("No hay ningún pliego vinculado a este proceso.")
                 
             st.divider()
-            st.markdown("**Subir o Reemplazar Documento**")
-            archivo_comodin = st.file_uploader(
-                "Subir Pliego, Imagen o Anexo", 
-                type=["pdf", "jpg", "jpeg", "png", "txt"], 
-                key=f"up_{row['ID']}")
+            archivo_nuevo = st.file_uploader("Agregar archivo al expediente", key=f"repo_{row['ID']}")
+            if st.button("📁 Archivar Documento", key=f"btn_arc_{row['ID']}"):
+                if archivo_nuevo:
+                    files = {"archivo": (archivo_nuevo.name, archivo_nuevo.getvalue(), archivo_nuevo.type)}
+                    requests.post(f"{API_URL}/subir_documento", data={"id_proceso": row['ID']}, files=files)
+                    st.success("Guardado en el repositorio.")
             
             if st.button("📤 Procesar con IA Multimodal", key=f"btn_up_{row['ID']}"):
                 if archivo_comodin:

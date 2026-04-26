@@ -24,74 +24,81 @@ def upload_to_gcs(file_bytes, file_name, content_type):
     blob.upload_from_string(file_bytes, content_type=content_type)
     return f"gs://{BUCKET_NAME}/{file_name}"
 
-@app.post("/")
-async def analizar_multimodal(
+# --- ENDPOINT 1: SOLO ALMACENAMIENTO ---
+@app.post("/subir_documento")
+async def guardar_en_repositorio(
     id_proceso: str = Form(...),
-    titulo: str = Form(None),
-    archivo: UploadFile = File(None)
+    archivo: UploadFile = File(...)
 ):
+    mime_type = archivo.content_type
+    file_bytes = await archivo.read()
+    
+    # Guardamos en una subcarpeta por id_proceso para mantener orden
+    gcs_uri = upload_to_gcs(file_bytes, f"{id_proceso}/{archivo.filename}", mime_type)
+    
     conn = get_db_connection()
     cur = conn.cursor()
-    
-    gcs_uri = None
-    mime_type = None
-    
-    # 1. Gestión de Archivos (Subida nueva o recuperación de DB)
-    if archivo:
-        mime_type = archivo.content_type 
-        file_bytes = await archivo.read()
-        # Guardamos con el nombre original para mantener la extensión
-        gcs_uri = upload_to_gcs(file_bytes, f"{id_proceso}_{archivo.filename}", mime_type)
-    else:
-        cur.execute("SELECT documento_url, mime_type FROM analisis_licitaciones WHERE id_proceso = %s", (id_proceso,))
-        res = cur.fetchone()
-        if res:
-            gcs_uri, mime_type = res[0], res[1]
-
-    # 2. Obtener Notas/Contexto
-    cur.execute("SELECT notas FROM analisis_licitaciones WHERE id_proceso = %s", (id_proceso,))
-    memoria = cur.fetchone()
-    notas = memoria[0] if memoria and memoria[0] else "Sin notas adicionales."
-    
-    # 3. Inteligencia Artificial Multimodal
-    llm = ChatVertexAI(model_name="gemini-2.5-flash", location="us-east1", temperature=0)
-    
-    instruccion = f"""Analiza este documento de licitación o anexo técnico.
-    CONTEXTO DEL CONSULTOR: {notas}
-    Tarea: Evalúa si es una oportunidad viable.
-    Responde estrictamente en formato JSON: {{"puntuacion": 8, "razonamiento": "tu análisis aquí", "es_objetivo": true}}"""
-    
-    contenido_mensaje = [{"type": "text", "text": instruccion}]
-    
-    if gcs_uri and mime_type:
-        contenido_mensaje.append({
-            "type": "media", 
-            "file_uri": gcs_uri, 
-            "mime_type": mime_type 
-        })
-
-    mensaje = HumanMessage(content=contenido_mensaje)
-    resultado = llm.invoke([mensaje])
-    
-    # Limpieza de respuesta JSON
-    texto_ia = resultado.content.replace('```json', '').replace('```', '').strip()
-    try:
-        data_ia = json.loads(texto_ia)
-    except:
-        data_ia = {"puntuacion": 0, "razonamiento": "Error interpretando la respuesta multimodal.", "es_objetivo": False}
-
-    # 4. Persistencia en Base de Datos
     cur.execute("""
-        INSERT INTO analisis_licitaciones (id_proceso, titulo, documento_url, mime_type, puntuacion, es_objetivo, reporte_completo, estado)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, 'Analizada')
-        ON CONFLICT (id_proceso) DO UPDATE SET 
-            puntuacion = EXCLUDED.puntuacion,
-            reporte_completo = EXCLUDED.reporte_completo,
-            documento_url = COALESCE(EXCLUDED.documento_url, analisis_licitaciones.documento_url),
-            mime_type = COALESCE(EXCLUDED.mime_type, analisis_licitaciones.mime_type)
-    """, (id_proceso, titulo, gcs_uri, mime_type, data_ia['puntuacion'], data_ia['es_objetivo'], data_ia['razonamiento']))
+        INSERT INTO documentos_licitacion (id_proceso, documento_url, mime_type, nombre_archivo)
+        VALUES (%s, %s, %s, %s)
+    """, (id_proceso, gcs_uri, mime_type, archivo.filename))
     
     conn.commit()
     cur.close()
     conn.close()
-    return {"status": "success", "mime_detectado": mime_type}
+    return {"status": "success", "message": f"Archivo {archivo.filename} guardado"}
+
+# --- ENDPOINT 2: ANÁLISIS INTEGRAL (EL AGENTE) ---
+@app.post("/analizar")
+async def analizar_con_todo_el_repositorio(id_proceso: str = Form(...)):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # 1. Recuperar todos los documentos vinculados
+    cur.execute("SELECT documento_url, mime_type FROM documentos_licitacion WHERE id_proceso = %s", (id_proceso,))
+    documentos = cur.fetchall()
+    
+    # 2. Recuperar notas del consultor
+    cur.execute("SELECT notas, titulo FROM analisis_licitaciones WHERE id_proceso = %s", (id_proceso,))
+    res_licitacion = cur.fetchone()
+    notas = res_licitacion[0] if res_licitacion[0] else "Sin notas adicionales."
+    titulo = res_licitacion[1]
+    
+    # 3. Configurar Gemini (Vertex AI)
+    llm = ChatVertexAI(model_name="gemini-2.5-flash", location="us-east1", temperature=0)
+    
+    instruccion = f"""Analiza esta licitación técnica considerando TODOS los documentos adjuntos.
+    NOTAS DEL CONSULTOR: {notas}
+    Tarea: Evalúa la viabilidad técnica y financiera.
+    Responde estrictamente en JSON: {{"puntuacion": 8, "razonamiento": "análisis cruzado...", "es_objetivo": true}}"""
+    
+    contenido_mensaje = [{"type": "text", "text": instruccion}]
+    
+    # Inyectamos TODOS los archivos en el mismo contexto
+    for doc_url, m_type in documentos:
+        contenido_mensaje.append({
+            "type": "media", 
+            "file_uri": doc_url, 
+            "mime_type": m_type 
+        })
+
+    resultado = llm.invoke([HumanMessage(content=contenido_mensaje)])
+    
+    # Procesar respuesta
+    texto_ia = resultado.content.replace('```json', '').replace('```', '').strip()
+    data_ia = json.loads(texto_ia)
+
+    # 4. Actualizar tabla principal con el resultado del análisis global
+    cur.execute("""
+        UPDATE analisis_licitaciones SET 
+            puntuacion = %s,
+            reporte_completo = %s,
+            es_objetivo = %s,
+            estado = 'Analizada'
+        WHERE id_proceso = %s
+    """, (data_ia['puntuacion'], data_ia['razonamiento'], data_ia['es_objetivo'], id_proceso))
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"status": "success", "puntuacion": data_ia['puntuacion']}
