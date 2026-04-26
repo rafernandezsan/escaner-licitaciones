@@ -4,10 +4,10 @@ import requests
 import psycopg2
 
 # Configuración de la página
-st.set_page_config(page_title="Radar de Licitaciones", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="Escaner de Licitaciones", page_icon="🤖", layout="wide")
 API_URL = "https://langgraph-orchestrator-worker-1066450737358.us-east1.run.app" # <-- Reemplaza por tu URL real
 
-st.title("🎯 Radar de Licitaciones DGCP")
+st.title("🤖 Analizador de Licitaciones AI")
 
 # --- 1. CONEXIÓN A LA BASE DE DATOS ---
 @st.cache_data(ttl=5)
@@ -105,7 +105,7 @@ for index, row in df.iterrows():
     with st.expander(f"{icono} {row['ID']} - {row['Título']} (Score: {score})"):
         
         # Creamos 3 pestañas para organizar la información
-        tab1, tab2, tab3 = st.tabs(["📊 Análisis e IA", "📝 Memoria del Consultor", "📁 Repositorio de Documentos"])
+        tab1, tab2, tab3 = st.tabs(["📊 Análisis de AI", "📝 Notas adicionales", "📁 Repositorio de Documentos"])
         
         # PESTAÑA 1: ANÁLISIS
         with tab1:
@@ -144,9 +144,9 @@ for index, row in df.iterrows():
             docs_vinculados = obtener_documentos_vinculados(row['ID'])
             
             if docs_vinculados:
-                with st.expander(f"Ver {len(docs_vinculados)} documentos archivados", expanded=True):
+                with st.expander(f"Ver {len(docs_vinculados)} documentos archivados", width="stretch", expanded=False):
                     for doc_id, nombre, url, mime in docs_vinculados:
-                        col_nom, col_desc, col_bor = st.columns([3, 1, 1])
+                        col_nom, col_desc, col_bor = st.columns([2, 0.05, 0.05])
                         
                         with col_nom:
                             st.caption(f"📄 {nombre}")
@@ -156,13 +156,13 @@ for index, row in df.iterrows():
                             # Nota: Para descarga directa desde GCS se requiere un Signed URL
                             url_segura = obtener_enlace_descarga(doc_id)
                             if url_segura:
-                                st.link_button("📥 Descargar", url_segura, use_container_width=True)
+                                st.link_button("📥", url_segura, help="Descargar desde GCS", use_container_width=False)
                             else:
                                 st.error("Error de enlace")
                             #st.link_button("Descargar", url, use_container_width=True)
                         
                         with col_bor:
-                            if st.button("🗑️ Borrar", key=f"del_{doc_id}", help="Eliminar de GCS y Base de Datos", type="secondary"):
+                            if st.button("🗑️", key=f"del_{doc_id}", help="Eliminar de GCS y Base de Datos", type="secondary"):
                                 with st.spinner("Eliminando..."):
                                     if eliminar_documento_api(doc_id):
                                         st.toast(f"✅ {nombre} eliminado correctamente")
