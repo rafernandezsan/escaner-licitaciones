@@ -131,7 +131,7 @@ async def eliminar_documento(id_doc: int = Form(...)):
 
 
 import google.auth
-from google.auth.transport.requests import Request
+from google.auth import impersonated_credentials
 from google.cloud import storage
 from datetime import timedelta
 
@@ -140,31 +140,40 @@ async def generar_descarga(id_doc: int = Form(...)):
     conn = get_db_connection()
     cur = conn.cursor()
     
-    # 1. Buscar la URL original en la BD
     cur.execute("SELECT documento_url FROM documentos_licitacion WHERE id = %s", (id_doc,))
     res = cur.fetchone()
     
     if not res:
-        return {"error": "Documento no encontrado"}, 404
+        return {"error": "No encontrado"}, 404
         
-    gcs_uri = res[0] # gs://bucket-name/id/archivo.pdf
+    gcs_uri = res[0]
     
-    credentials, project_id = google.auth.default()
-    auth_request = Request()
-    credentials.refresh(auth_request)
-
-    # 2. Generar URL Firmada de GCS
-    client = storage.Client(credentials=credentials, project=project_id)
+    # --- LA MAGIA DE LA IMPERSONACIÓN (IAM Signer) ---
+    service_account_email = "1066450737358-compute@developer.gserviceaccount.com"
+    
+    # 1. Obtener las credenciales base (tokens) de Cloud Run
+    default_creds, project_id = google.auth.default()
+    
+    # 2. Envolverlas en "Credenciales Impersonadas"
+    # Este objeto SÍ tiene el método sign_bytes() que la librería exige,
+    # y usa la API de IAM internamente para firmar.
+    iam_creds = impersonated_credentials.Credentials(
+        source_credentials=default_creds,
+        target_principal=service_account_email,
+        target_scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    
+    # 3. Inicializar el cliente Storage con la envoltura
+    client = storage.Client(credentials=iam_creds, project=project_id)
     bucket = client.bucket(BUCKET_NAME)
     blob_path = gcs_uri.replace(f"gs://{BUCKET_NAME}/", "")
     blob = bucket.blob(blob_path)
     
-    # El enlace expirará en 15 minutos
+    # 4. Generar URL (ya no necesitamos pasar el service_account_email aquí)
     url_firmada = blob.generate_signed_url(
         version="v4",
         expiration=timedelta(minutes=15),
-        method="GET",
-        service_account_email="1066450737358-compute@developer.gserviceaccount.com"
+        method="GET"
     )
     
     cur.close()
