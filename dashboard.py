@@ -11,6 +11,8 @@ API_URL = "https://langgraph-orchestrator-worker-1066450737358.us-east1.run.app"
 # --- SISTEMA DE AUTENTICACIÓN ---
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
+if "show_reset" not in st.session_state:
+    st.session_state.show_reset = False
 
 def obtener_credenciales():
     # En Cloud Run leemos las variables de entorno, localmente usamos st.secrets
@@ -18,23 +20,51 @@ def obtener_credenciales():
         return os.environ["ADMIN_EMAIL"], os.environ["ADMIN_PASSWORD"]
     else:
         # Valor por defecto si olvidaste ponerlo en tu secrets.toml
-        return st.secrets.get("ADMIN_EMAIL", "admin@escaner.com"), st.secrets.get("ADMIN_PASSWORD", "password123")
+        return st.secrets.get("ADMIN_EMAIL", "fernandez.sanchez@gmail.com"), st.secrets.get("ADMIN_PASSWORD", "password123")
 
 if not st.session_state.authenticated:
     st.title("🔐 Acceso al Sistema")
     
-    with st.form("login_form"):
-        email = st.text_input("Correo Electrónico")
-        password = st.text_input("Contraseña", type="password")
-        submit_button = st.form_submit_button("Iniciar Sesión")
+    if not st.session_state.show_reset:
+        with st.form("login_form"):
+            email = st.text_input("Correo Electrónico")
+            password = st.text_input("Contraseña", type="password")
+            submit_button = st.form_submit_button("Iniciar Sesión")
+            
+            if submit_button:
+                valid_email, valid_pass = obtener_credenciales()
+                
+                # Permitir el uso de la contraseña reseteada temporalmente
+                if "temp_password" in st.session_state and email == valid_email:
+                    valid_pass = st.session_state.temp_password
+                    
+                if email == valid_email and password == valid_pass:
+                    st.session_state.authenticated = True
+                    st.rerun()
+                else:
+                    st.error("Credenciales incorrectas. Intenta de nuevo.")
         
-        if submit_button:
-            valid_email, valid_pass = obtener_credenciales()
-            if email == valid_email and password == valid_pass:
-                st.session_state.authenticated = True
-                st.rerun()
-            else:
-                st.error("Credenciales incorrectas. Intenta de nuevo.")
+        if st.button("¿Olvidaste tu contraseña?"):
+            st.session_state.show_reset = True
+            st.rerun()
+    else:
+        st.subheader("Restablecer Contraseña")
+        with st.form("reset_form"):
+            reset_email = st.text_input("Ingresa tu correo electrónico")
+            new_password = st.text_input("Nueva Contraseña", type="password")
+            reset_submit = st.form_submit_button("Restablecer")
+            
+            if reset_submit:
+                valid_email, _ = obtener_credenciales()
+                if reset_email != valid_email:
+                    st.error("El usuario no existe en el sistema.")
+                else:
+                    st.session_state.temp_password = new_password
+                    st.success("Contraseña actualizada. Haz clic en 'Volver' e inicia sesión con tu nueva contraseña.")
+                    
+        if st.button("Volver al Inicio de Sesión"):
+            st.session_state.show_reset = False
+            st.rerun()
     
     # Detenemos la ejecución del resto del script para que no se vea el dashboard
     st.stop()
