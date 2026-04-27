@@ -8,6 +8,45 @@ import os
 st.set_page_config(page_title="Escaner de Licitaciones", page_icon="🤖", layout="wide")
 API_URL = "https://langgraph-orchestrator-worker-1066450737358.us-east1.run.app" # <-- Reemplaza por tu URL real
 
+# --- SISTEMA DE AUTENTICACIÓN ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+def obtener_credenciales():
+    # En Cloud Run leemos las variables de entorno, localmente usamos st.secrets
+    if "ADMIN_EMAIL" in os.environ:
+        return os.environ["ADMIN_EMAIL"], os.environ["ADMIN_PASSWORD"]
+    else:
+        # Valor por defecto si olvidaste ponerlo en tu secrets.toml
+        return st.secrets.get("ADMIN_EMAIL", "admin@escaner.com"), st.secrets.get("ADMIN_PASSWORD", "password123")
+
+if not st.session_state.authenticated:
+    st.title("🔐 Acceso al Sistema")
+    
+    with st.form("login_form"):
+        email = st.text_input("Correo Electrónico")
+        password = st.text_input("Contraseña", type="password")
+        submit_button = st.form_submit_button("Iniciar Sesión")
+        
+        if submit_button:
+            valid_email, valid_pass = obtener_credenciales()
+            if email == valid_email and password == valid_pass:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Credenciales incorrectas. Intenta de nuevo.")
+    
+    # Detenemos la ejecución del resto del script para que no se vea el dashboard
+    st.stop()
+
+# Agregamos un botón para cerrar sesión en la barra lateral
+with st.sidebar:
+    st.markdown("👤 **Modo Administrador**")
+    if st.button("Cerrar Sesión", type="primary"):
+        st.session_state.authenticated = False
+        st.rerun()
+    st.divider()
+
 st.title("🤖 Analizador de Licitaciones AI")
 
 # --- FUNCIÓN AUXILIAR DE CONEXIÓN ---
