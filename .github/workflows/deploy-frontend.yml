@@ -57,3 +57,8 @@ jobs:
           image: ${{ env.FULL_IMAGE_NAME }}
           # No necesita conexión a Cloud SQL directamente, pero sí acceso público
           flags: '--allow-unauthenticated'
+          env_vars: |
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_NAME=${{ secrets.DB_NAME }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASS=${{ secrets.DB_PASS }}
