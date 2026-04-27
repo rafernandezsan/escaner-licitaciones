@@ -55,8 +55,8 @@ jobs:
           service: ${{ env.SERVICE_NAME }}
           region: ${{ env.REGION }}
           image: ${{ env.FULL_IMAGE_NAME }}
-          # No necesita conexión a Cloud SQL directamente, pero sí acceso público
-          flags: '--allow-unauthenticated'
+          # Se necesita conexión al socket de Cloud SQL y acceso público
+          flags: '--allow-unauthenticated --add-cloudsql-instances=escanerlicitaciones:us-east1:licitaciones-db-instance'
           env_vars: |
             DB_HOST=${{ secrets.DB_HOST }}
             DB_NAME=${{ secrets.DB_NAME }}
