@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import psycopg2
+import os
 
 # Configuración de la página
 st.set_page_config(page_title="Escaner de Licitaciones", page_icon="🤖", layout="wide")
@@ -9,14 +10,25 @@ API_URL = "https://langgraph-orchestrator-worker-1066450737358.us-east1.run.app"
 
 st.title("🤖 Analizador de Licitaciones AI")
 
+# --- FUNCIÓN AUXILIAR DE CONEXIÓN ---
+def get_db_connection():
+    # En Cloud Run leemos las variables de entorno, localmente usamos st.secrets
+    if "DB_HOST" in os.environ:
+        return psycopg2.connect(
+            host=os.environ["DB_HOST"], database=os.environ["DB_NAME"],
+            user=os.environ["DB_USER"], password=os.environ["DB_PASS"]
+        )
+    else:
+        return psycopg2.connect(
+            host=st.secrets["DB_HOST"], database=st.secrets["DB_NAME"],
+            user=st.secrets["DB_USER"], password=st.secrets["DB_PASS"]
+        )
+
 # --- 1. CONEXIÓN A LA BASE DE DATOS ---
 @st.cache_data(ttl=5)
 def obtener_licitaciones():
     try:
-        conn = psycopg2.connect(
-            host=st.secrets["DB_HOST"], database=st.secrets["DB_NAME"],
-            user=st.secrets["DB_USER"], password=st.secrets["DB_PASS"]
-        )
+        conn = get_db_connection()
         cursor = conn.cursor()
         # Traemos todas las columnas, incluyendo el documento_url
         cursor.execute("SELECT id_proceso, titulo, estado, puntuacion, notas, reporte_completo, documento_url FROM analisis_licitaciones")
@@ -34,10 +46,7 @@ df = obtener_licitaciones()
 
 def obtener_documentos_vinculados(id_proceso):
     try:
-        conn = psycopg2.connect(
-            host=st.secrets["DB_HOST"], database=st.secrets["DB_NAME"],
-            user=st.secrets["DB_USER"], password=st.secrets["DB_PASS"]
-        )
+        conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
             SELECT id, nombre_archivo, documento_url, mime_type 
