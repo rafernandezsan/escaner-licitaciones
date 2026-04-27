@@ -1,0 +1,19 @@
+# Usamos una versión ligera de Python
+FROM python:3.11-slim
+
+# Establecemos el directorio de trabajo
+WORKDIR /app
+
+# Copiamos las dependencias del frontend y las instalamos
+COPY requirements-frontend.txt .
+RUN pip install --no-cache-dir -r requirements-frontend.txt
+
+# Copiamos el script del dashboard
+COPY dashboard.py .
+
+# Exponemos el puerto 8080 (Requisito de GCP Cloud Run)
+EXPOSE 8080
+
+# Comando para arrancar la app de Streamlit en modo headless (para servidores)
+# Cloud Run inyectará la variable de entorno $PORT, que Streamlit usará.
+CMD ["streamlit", "run", "dashboard.py", "--server.port", "8080", "--server.headless", "true"]

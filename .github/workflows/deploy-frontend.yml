@@ -1,0 +1,59 @@
+name: Deploy Frontend a GCP Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: escanerlicitaciones
+  REGION: us-east1
+  REPO_NAME: escaner-ti-langgraph-agents # Puedes usar el mismo repo de Artifact Registry
+  SERVICE_NAME: escaner-licitaciones-frontend # ¡Nuevo nombre para el servicio de frontend!
+  
+  WORKLOAD_IDENTITY_PROVIDER: projects/1066450737358/locations/global/workloadIdentityPools/github-pool/providers/github-provider 
+  SERVICE_ACCOUNT: github-actions-sa@escanerlicitaciones.iam.gserviceaccount.com 
+
+jobs:
+  build-and-deploy-frontend:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Autenticación en Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: 'access_token'
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+
+      - name: Autenticación en Docker (Artifact Registry)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGION }}-docker.pkg.dev
+          username: 'oauth2accesstoken'
+          password: '${{ steps.auth.outputs.access_token }}'
+
+      - name: Build y Push de la imagen Docker del Frontend
+        run: |
+          IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/frontend:${{ github.sha }}"
+          docker build -t $IMAGE_TAG -f Dockerfile-frontend .
+          docker push $IMAGE_TAG
+          echo "FULL_IMAGE_NAME=$IMAGE_TAG" >> $GITHUB_ENV
+
+      - name: Desplegar Frontend en Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: ${{ env.FULL_IMAGE_NAME }}
+          # No necesita conexión a Cloud SQL directamente, pero sí acceso público
+          flags: '--allow-unauthenticated'
