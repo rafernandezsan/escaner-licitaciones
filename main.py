@@ -3,6 +3,7 @@ import psycopg2
 import json
 import io
 import html
+import hashlib
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import StreamingResponse
 from google.cloud import storage
@@ -245,3 +246,55 @@ async def generar_reporte_pdf(id_proceso: str = Form(...)):
         media_type="application/pdf", 
         headers={"Content-Disposition": f'attachment; filename="Reporte_Licitacion_{id_proceso}.pdf"'}
     )
+
+# --- ENDPOINT 4: CREACIÓN DE USUARIOS (SIGNUP) ---
+@app.post("/signup")
+async def create_user(
+    email: str = Form(...),
+    password: str = Form(...),
+    rol: str = Form(default="analista"), # Roles esperados: administrador, analista, invitado
+    admin_email: str = Form(...),
+    admin_password: str = Form(...)
+):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # 1. Asegurar que la tabla existe
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id SERIAL PRIMARY KEY, 
+            email VARCHAR(255) UNIQUE NOT NULL,
+            password_hash VARCHAR(255) NOT NULL, 
+            rol VARCHAR(50) NOT NULL
+        )
+    """)
+    conn.commit()
+    
+    # 2. Validar que quien hace la petición es un administrador válido
+    is_admin = False
+    if admin_email == os.environ.get("ADMIN_EMAIL") and admin_password == os.environ.get("ADMIN_PASSWORD"):
+        is_admin = True
+    else:
+        admin_hash = hashlib.sha256(admin_password.encode()).hexdigest()
+        cur.execute("SELECT id FROM usuarios WHERE email = %s AND password_hash = %s AND rol = 'administrador'", (admin_email, admin_hash))
+        if cur.fetchone():
+            is_admin = True
+            
+    if not is_admin:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=403, detail="No autorizado. Solo un administrador puede crear nuevos usuarios.")
+        
+    # 3. Insertar el nuevo usuario en la base de datos
+    hashed_pw = hashlib.sha256(password.encode()).hexdigest()
+    try:
+        cur.execute("INSERT INTO usuarios (email, password_hash, rol) VALUES (%s, %s, %s)", (email, hashed_pw, rol))
+        conn.commit()
+    except psycopg2.IntegrityError:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail="El correo electrónico ya está registrado.")
+    finally:
+        cur.close()
+        conn.close()
+        
+    return {"status": "success", "message": f"Usuario {email} creado exitosamente con el rol '{rol}'."}
